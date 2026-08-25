@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mock Client Site — GA4 Cross-Domain Test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; }
+    h1 { font-size: 1.4rem; }
+    h2 { font-size: 1.1rem; margin-top: 2rem; }
+    fieldset { border: 1px solid #ccc; border-radius: 8px; margin: 1rem 0; padding: 1rem 1.25rem; }
+    legend { font-weight: 600; padding: 0 6px; }
+    label { display: block; font-size: 0.85rem; margin: 8px 0 2px; color: #444; }
+    input[type="text"] { width: 100%; padding: 8px; border: 1px solid #bbb; border-radius: 6px; box-sizing: border-box; }
+    button, a.btn { display: inline-block; margin-top: 12px; padding: 10px 16px; border: 0; border-radius: 6px; background: #0a7d3c; color: #fff; font-size: 0.9rem; cursor: pointer; text-decoration: none; }
+    a.btn.secondary { background: #345; }
+    iframe { width: 100%; height: 640px; border: 1px solid #ccc; border-radius: 8px; margin-top: 12px; }
+    pre { background: #111; color: #0f0; padding: 12px; border-radius: 6px; font-size: 0.75rem; overflow: auto; max-height: 200px; }
+    .hint { font-size: 0.8rem; color: #666; }
+    .warn { font-size: 0.8rem; color: #a00; }
+    code { background: #eee; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Mock Client Site — GA4 Cross-Domain Test Harness</h1>
+  <p class="hint">
+    This page simulates a golf club's own website that has its <strong>own GA4 property</strong> with
+    cross-domain linking configured to point at the Chronogolf widget domain. Use it to test that the
+    original client/session ID and campaign attribution survive the hop into the widget.
+  </p>
+  <p class="warn">
+    Served over HTTPS (GitHub Pages)? The iframe test (Test B) requires the widget URL to also be HTTPS,
+    otherwise the browser blocks it as mixed content. Point the widget URL at a production/staging HTTPS
+    host for Test B. Test A (direct link) works regardless.
+  </p>
+
+  <fieldset>
+    <legend>Config</legend>
+    <label>Client GA4 Measurement ID (this mock site's property)</label>
+    <input type="text" id="clientGa4Id" placeholder="G-XXXXXXXXXX" />
+
+    <label>Widget base URL (the Chronogolf widget you're testing)</label>
+    <input type="text" id="widgetUrl" value="https://www.chronogolf.com/club/YOUR_CLUB_ID/widget" />
+
+    <label>Widget domain(s) for the linker (space-separated, e.g. <code>chronogolf.com www.chronogolf.com</code>)</label>
+    <input type="text" id="linkerDomains" value="chronogolf.com www.chronogolf.com" />
+
+    <label>UTM query string appended to the widget URL</label>
+    <input type="text" id="utms" value="utm_source=test_client&utm_medium=cpc&utm_campaign=summer2026" />
+
+    <button id="applyConfig">Apply &amp; (re)load GA4</button>
+    <p class="hint">The client GA4 tag loads only after you click Apply, so you can set the ID first.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Test A — Direct link (exercises the <code>_gl</code> linker path)</legend>
+    <p class="hint">
+      GA4's linker auto-appends <code>?_gl=...</code> to this link because the target domain is in the
+      linker <code>domains</code> list. The widget's <code>accept_incoming: true</code> then restores the
+      original client ID. Open in a new tab and inspect the URL — it should contain <code>_gl</code>.
+    </p>
+    <a id="directLink" class="btn" href="#" target="_blank" rel="noopener">Open widget in new tab →</a>
+  </fieldset>
+
+  <fieldset>
+    <legend>Test B — Iframe embed (exercises the <code>postMessage</code> path)</legend>
+    <p class="hint">
+      The widget is embedded below. Once GA4 resolves this mock site's client/session ID, we
+      <code>postMessage</code> it into the iframe as <code>googleAnalytics4ClubConfig</code>.
+    </p>
+    <button id="loadIframe">Load widget iframe &amp; send postMessage</button>
+    <div id="iframeContainer"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Log</legend>
+    <pre id="log">Waiting…\n</pre>
+  </fieldset>
+
+  <script>
+    var logEl = document.getElementById('log');
+    function log() {
+      var msg = Array.prototype.map.call(arguments, function (a) {
+        return typeof a === 'object' ? JSON.stringify(a) : String(a);
+      }).join(' ');
+      logEl.textContent += msg + '\n';
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // --- Client-side GA4 (this mock site's own property) ---
+    window.dataLayer = window.dataLayer || [];
+    function gtag() { dataLayer.push(arguments); }
+
+    function currentConfig() {
+      return {
+        ga4Id: document.getElementById('clientGa4Id').value.trim(),
+        widgetUrl: document.getElementById('widgetUrl').value.trim(),
+        domains: document.getElementById('linkerDomains').value.trim().split(/\s+/).filter(Boolean),
+        utms: document.getElementById('utms').value.trim(),
+      };
+    }
+
+    function widgetUrlWithUtms() {
+      var c = currentConfig();
+      if (!c.utms) return c.widgetUrl;
+      return c.widgetUrl + (c.widgetUrl.indexOf('?') === -1 ? '?' : '&') + c.utms;
+    }
+
+    document.getElementById('applyConfig').addEventListener('click', function () {
+      var c = currentConfig();
+      if (!c.ga4Id) { alert('Enter the client GA4 Measurement ID first.'); return; }
+
+      // Load the GA4 SDK for the mock client property (once).
+      if (!window.__ga4Loaded) {
+        var s = document.createElement('script');
+        s.async = true;
+        s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(c.ga4Id);
+        document.head.appendChild(s);
+        window.__ga4Loaded = true;
+      }
+
+      gtag('js', new Date());
+      // Cross-domain linking: append _gl to links pointing at the widget domain(s).
+      gtag('config', c.ga4Id, {
+        linker: { domains: c.domains },
+      });
+      log('Client GA4 configured:', c.ga4Id, 'linker domains:', c.domains);
+      refreshDirectLink();
+    });
+
+    function refreshDirectLink() {
+      document.getElementById('directLink').href = widgetUrlWithUtms();
+    }
+    refreshDirectLink();
+    ['widgetUrl', 'utms'].forEach(function (id) {
+      document.getElementById(id).addEventListener('input', refreshDirectLink);
+    });
+
+    // --- Iframe + postMessage path ---
+    document.getElementById('loadIframe').addEventListener('click', function () {
+      var c = currentConfig();
+      if (!c.ga4Id) { alert('Enter the client GA4 Measurement ID and click Apply first.'); return; }
+
+      var container = document.getElementById('iframeContainer');
+      container.innerHTML = '';
+      var iframe = document.createElement('iframe');
+      iframe.src = widgetUrlWithUtms();
+      container.appendChild(iframe);
+      log('Iframe loaded:', iframe.src);
+
+      // Resolve this mock site's client_id + session_id, then post into the iframe.
+      gtag('get', c.ga4Id, 'client_id', function (clientId) {
+        gtag('get', c.ga4Id, 'session_id', function (sessionId) {
+          var payload = {
+            googleAnalytics4ClubConfig: {
+              clientId: clientId,
+              sessionId: sessionId,
+            },
+          };
+          // Give the iframe a moment to register its message listener.
+          setTimeout(function () {
+            iframe.contentWindow.postMessage(payload, '*');
+            log('postMessage sent →', payload.googleAnalytics4ClubConfig);
+          }, 1500);
+        });
+      });
+    });
+
+    log('Ready. 1) enter GA4 ID, 2) Apply, 3) run Test A or Test B.');
+  </script>
+</body>
+</html>
