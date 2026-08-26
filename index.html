@@ -121,9 +121,6 @@
 
       gtag('js', new Date());
       // Cross-domain linking: append _gl to links pointing at the widget domain(s).
-      gtag('config', c.ga4Id, {
-        linker: { domains: c.domains },
-      });
       log('Client GA4 configured:', c.ga4Id, 'linker domains:', c.domains);
       refreshDirectLink();
     });
